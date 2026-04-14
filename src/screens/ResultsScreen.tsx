@@ -63,34 +63,27 @@ export default function ResultsScreen({ route, navigation }: Props) {
   useEffect(() => {
     const load = async () => {
       try {
-        // 1. Fetch test for total_marks and template_id
+        // 1. Fetch test for total_marks
         const { data: test } = await supabase
           .from('tests')
-          .select('template_id, total_marks')
+          .select('total_marks')
           .eq('id', testId)
           .single();
 
-        let showImmediately = false;
-        if (test?.template_id) {
-          const { data: template } = await supabase
-            .from('templates')
-            .select('show_results_immediately')
-            .eq('id', test.template_id)
-            .single();
-          showImmediately = template?.show_results_immediately ?? false;
-        }
-        setShowResults(showImmediately);
-        
         if (test?.total_marks) {
           setTestTotalMarks(test.total_marks);
         }
 
-        // 2. Fetch attempt
+        // 2. Fetch attempt with sre and passed fields
         const attemptData = await fetchResults(attemptId);
         setAttempt(attemptData);
 
-        // 3. If showing results, fetch all questions and answers
-        if (showImmediately) {
+        // 3. Check if results should be shown based on attempts table (score and passed fields)
+        const shouldShowResults = (attemptData && attemptData.score != null && attemptData.passed != null) ?? false;
+        setShowResults(shouldShowResults);
+        
+        // 4. If showing results, fetch all questions and answers
+        if (shouldShowResults) {
           // Fetch all test questions
           const { data: testQuestions } = await supabase
             .from('test_questions')

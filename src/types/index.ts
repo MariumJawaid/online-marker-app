@@ -66,6 +66,7 @@ export interface TestAttempt {
   violations: number;
   started_at: string;
   submitted_at: string | null;
+  passed: boolean | null;
   created_at: string;
 }
 
