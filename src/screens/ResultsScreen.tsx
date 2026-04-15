@@ -55,18 +55,20 @@ export default function ResultsScreen({ route, navigation }: Props) {
 
   const [loading, setLoading]       = useState(true);
   const [showResults, setShowResults] = useState(false);
+  const [showDetailedReport, setShowDetailedReport] = useState(false);
   const [attempt, setAttempt]       = useState<TestAttempt | null>(null);
   const [answers, setAnswers]       = useState<AnswerWithQuestion[]>([]);
   const [testTotalMarks, setTestTotalMarks] = useState<number | null>(null);
   const [allQuestions, setAllQuestions] = useState<AnswerWithQuestion[]>([]);
+  const [testEndTime, setTestEndTime] = useState<string | null>(null);
 
   useEffect(() => {
     const load = async () => {
       try {
-        // 1. Fetch test for total_marks
+        // 1. Fetch test for total_marks and end_time
         const { data: test } = await supabase
           .from('tests')
-          .select('total_marks')
+          .select('total_marks, end_time')
           .eq('id', testId)
           .single();
 
@@ -74,16 +76,29 @@ export default function ResultsScreen({ route, navigation }: Props) {
           setTestTotalMarks(test.total_marks);
         }
 
-        // 2. Fetch attempt with sre and passed fields
+        if (test?.end_time) {
+          setTestEndTime(test.end_time);
+        }
+
+        // 2. Fetch attempt with score and passed fields
         const attemptData = await fetchResults(attemptId);
         setAttempt(attemptData);
 
-        // 3. Check if results should be shown based on attempts table (score and passed fields)
-        const shouldShowResults = (attemptData && attemptData.score != null && attemptData.passed != null) ?? false;
-        setShowResults(shouldShowResults);
+        // 3. Check if score is available (always true after submission, as score is calculated immediately)
+        const hasScore = (attemptData && attemptData.score != null && attemptData.passed != null) ?? false;
+        setShowResults(hasScore);
         
-        // 4. If showing results, fetch all questions and answers
-        if (shouldShowResults) {
+        // 4. Check if current time is after test end_time (for detailed report visibility)
+        if (test?.end_time) {
+          const currentTime = new Date();
+          const endTime = new Date(test.end_time);
+          const canShowDetailed = currentTime >= endTime;
+          setShowDetailedReport(canShowDetailed);
+        }
+        
+        // 5. Always fetch all questions and answers (since score is released immediately)
+        // But detailed content will be shown conditionally
+        if (hasScore) {
           // Fetch all test questions
           const { data: testQuestions } = await supabase
             .from('test_questions')
@@ -187,7 +202,7 @@ export default function ResultsScreen({ route, navigation }: Props) {
     );
   }
 
-  // ── Submission confirmed, results not yet available ──
+  // ── Submission confirmed but score not yet available ──
   if (!showResults) {
     return (
       <View style={[styles.center, { paddingBottom: insets.bottom }]}>
@@ -196,7 +211,7 @@ export default function ResultsScreen({ route, navigation }: Props) {
           <Text style={styles.checkmark}>✓</Text>
           <Text style={styles.confirmTitle}>Test Submitted</Text>
           <Text style={styles.confirmSub}>
-            Your answers have been recorded. Results will be available once the teacher reviews them.
+            Your answers have been recorded. Your score will be available shortly.
           </Text>
           <TouchableOpacity
             style={styles.backBtn}
@@ -210,13 +225,24 @@ export default function ResultsScreen({ route, navigation }: Props) {
     );
   }
 
-  // ── Detailed results ──
+  // ── Format test end time for display ──
+  const formatEndTime = (endTime: string) => {
+    const date = new Date(endTime);
+    return date.toLocaleString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  };
+
+  // ── Detailed results with conditional detailed report visibility ──
   return (
     <View style={[styles.container, { paddingBottom: insets.bottom }]}>
       <StatusBar barStyle="light-content" />
       <ScrollView contentContainerStyle={styles.scrollContent}>
 
-        {/* Score card */}
+        {/* Score card - ALWAYS shown */}
         <View style={styles.scoreCard}>
           <Text style={styles.scoreLabel}>Your Score</Text>
           <Text style={styles.scoreValue}>
@@ -230,8 +256,18 @@ export default function ResultsScreen({ route, navigation }: Props) {
           </Text>
         </View>
 
-        {/* Per-question breakdown */}
-        {questionsToDisplay.map((a, idx) => {
+        {/* Message: Detailed report available after test end time */}
+        {!showDetailedReport && testEndTime && (
+          <View style={styles.delayedReportCard}>
+            <Text style={styles.delayedReportTitle}>📋 Full Report Coming Soon</Text>
+            <Text style={styles.delayedReportText}>
+              Your score has been released. The detailed report with correct/incorrect answers and explanations will be available after the test ends at {formatEndTime(testEndTime)}.
+            </Text>
+          </View>
+        )}
+
+        {/* Per-question breakdown - ONLY shown after test end time */}
+        {showDetailedReport && questionsToDisplay.map((a, idx) => {
           const q          = a.question;
           const isAnswered = a.selected_option !== undefined;
           const isCorrect  = a.is_correct === true;
@@ -333,13 +369,13 @@ const styles = StyleSheet.create({
   confirmTitle: { fontSize: 22, fontWeight: '700', color: '#fff', marginBottom: 10 },
   confirmSub:   { fontSize: 14, color: '#8888AA', textAlign: 'center', lineHeight: 22, marginBottom: 24 },
 
-  // ── Score card ──
+  // ── Score card (always shown) ──
   scoreCard: {
     backgroundColor: '#14142B',
     borderRadius: 16,
     padding: 24,
     alignItems: 'center',
-    marginBottom: 24,
+    marginBottom: 20,
     borderWidth: 1,
     borderColor: '#2D2D44',
   },
@@ -348,7 +384,28 @@ const styles = StyleSheet.create({
   scoreDenom:   { fontSize: 24, color: '#8888AA', fontWeight: '400' },
   correctText:  { fontSize: 14, color: '#8888AA', marginTop: 8 },
 
-  // ── Result rows ──
+  // ── Delayed report message ──
+  delayedReportCard: {
+    backgroundColor: 'rgba(100, 116, 255, 0.1)',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(100, 116, 255, 0.3)',
+  },
+  delayedReportTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#6C74FF',
+    marginBottom: 8,
+  },
+  delayedReportText: {
+    fontSize: 13,
+    color: '#8888AA',
+    lineHeight: 20,
+  },
+
+  // ── Result rows (shown only after test end time) ──
   resultRow: {
     backgroundColor: '#14142B',
     borderRadius: 12,
